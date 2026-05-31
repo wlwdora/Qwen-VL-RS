@@ -1,6 +1,6 @@
 # Qwen-VL-RS: Remote Sensing Image Understanding via Vision-Language Model Fine-tuning
 
-**基于 Qwen3-VL 的遥感图像描述与理解 —— 项目**
+**基于 Qwen3-VL 的遥感图像描述与理解**
 
 ---
 
@@ -244,9 +244,9 @@ python inference/gradio_app.py
 
 ---
 
-## 面试要点
+## 要点
 
-做完这个项目后，你应该能清晰地回答：
+尝试做完这个项目后，我希望可以应该能清晰地回答：
 
 1. **为什么遥感图像描述比自然图像更难？**（尺度变化、类别细粒度、空间上下文、光谱信息）
 2. **为什么不直接用 GPT-4V？**（API 成本、数据隐私、推理延迟、可定制性、小模型在特定领域的潜力）
@@ -260,10 +260,10 @@ python inference/gradio_app.py
 
 ## 作者
 
-- **开发**: [Your Name] - 武汉大学电子信息学院
+- **开发**: wlwdora - 武汉大学电子信息学院
 - **方向**: 多模态视觉语言模型 · 遥感图像理解 · 高效微调
-- **联系**: your-email@whu.edu.cn
-- **日期**: 2026-06
+- **联系**: 2021302121165@whu.edu.cn
+- **日期**: 2026-04
 
 ---
 
