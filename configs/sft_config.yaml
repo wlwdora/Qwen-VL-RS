@@ -1,0 +1,36 @@
+# ==================== 遥感图像描述 SFT 训练配置 ====================
+model:
+  name: "Qwen/Qwen3-VL-2B-Instruct"
+  local_path: "D:/Qwen/Qwen3-VL-2B-Instruct"   # 本地缓存路径
+  torch_dtype: "bfloat16"
+  attn_implementation: "sdpa"                   # flash_attention_2 / sdpa / eager
+  trust_remote_code: true
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+training:
+  output_dir: "./output/qwen_vl_rs_lora"
+  num_train_epochs: 3
+  per_device_train_batch_size: 2
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 4                 # 等效 batch_size = 2 × 4 = 8
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.1
+  lr_scheduler_type: "cosine"
+  weight_decay: 0.01
+  max_length: 512
+  gradient_checkpointing: true
+  fp16: false
+  bf16: true
+  dataloader_num_workers: 0                      # Windows 环境必须设为 0
+  save_strategy: "epoch"
+  eval_strategy: "epoch"
+  logging_steps: 20
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  report_to: ["tensorboard"]
+  seed: 42

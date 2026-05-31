@@ -1,0 +1,62 @@
+# ==================== 数据集配置 ====================
+
+datasets:
+  rsicd:
+    name: "RSICD"
+    image_dir: "data/raw/RSICD/images/"
+    annotation_file: "data/raw/RSICD/dataset.json"
+    num_images: 10921
+    captions_per_image: 5
+    categories: 30+   # 机场/海滩/桥梁/森林/居民区等
+
+  ucm:
+    name: "UCM-Captions"
+    image_dir: "data/raw/UCM-Captions/images/"
+    annotation_file: "data/raw/UCM-Captions/dataset.json"
+    num_images: 2100
+    captions_per_image: 5
+    categories: 21     # 机场/海滩/丛林/密集住宅/森林/高速公路等
+
+  sydney:
+    name: "Sydney-Captions"
+    image_dir: "data/raw/Sydney-Captions/images/"
+    annotation_file: "data/raw/Sydney-Captions/dataset.json"
+    num_images: 613
+    captions_per_image: 5
+    categories: 7      # 住宅/工业/河流/海洋/草地/灌木/公路
+
+preprocessing:
+  image:
+    max_size: 512             # 缩放后最大边长
+    min_size: 224             # 缩放后最小边长
+    keep_aspect_ratio: true
+    mean: [0.48145466, 0.4578275, 0.40821073]    # CLIP 归一化参数
+    std: [0.26862954, 0.26130258, 0.27577711]
+
+  text:
+    max_length: 512
+    add_special_tokens: true
+
+augmentation:
+  spatial:
+    rotation: [0, 90, 180, 270]   # 离散旋转（遥感图像无固定朝向）
+    horizontal_flip: 0.5
+    vertical_flip: 0.5
+    random_crop_scale: [0.5, 1.5]
+
+  spectral:
+    brightness: 0.1              # 模拟不同光照条件
+    contrast: 0.1                # 模拟大气散射影响
+    saturation: 0.1
+    hue: 0.05
+
+  advanced:
+    mixup_alpha: 0.2            # 设为 0.0 禁用
+    cutmix_alpha: 0.0           # 实验性功能
+
+split:
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  shuffle: true
+  seed: 42
