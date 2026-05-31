@@ -26,6 +26,7 @@ checkpoints/
 
 # Training logs
 experiments/logs/*
+!experiments/logs/.gitkeep
 runs/
 lightning_logs/
 wandb/
