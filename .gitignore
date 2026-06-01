@@ -55,3 +55,7 @@ Thumbs.db
 # Misc
 *.log
 *.tmp
+
+# Claude Code
+.claude/
+*.docx
