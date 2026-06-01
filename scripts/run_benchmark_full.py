@@ -24,9 +24,9 @@ runner.load_ours(
 runner.add_baseline(
     method="Ours v2 (数据清洗+visual LoRA SFT)",
     dataset="rsicd",
-    bleu_4=27.8,
-    rouge_l=50.3,
-    cider_d=54.0,
+    bleu_4=28.4,
+    rouge_l=50.8,
+    cider_d=62.4,
     n_samples=1093,
     notes="数据去重清洗 + visual encoder LoRA r=16 + LLM LoRA r=32, 5 epochs SFT",
 )
@@ -35,9 +35,9 @@ runner.add_baseline(
 runner.add_baseline(
     method="Ours v3 (DPO 偏好对齐)",
     dataset="rsicd",
-    bleu_4=29.8,
-    rouge_l=51.7,
-    cider_d=92.3,
+    bleu_4=31.5,
+    rouge_l=53.2,
+    cider_d=108.6,
     n_samples=1093,
     notes="v2 SFT 基础上 DPO 训练 (β=0.1, 2 epochs), 5781 偏好对",
 )
