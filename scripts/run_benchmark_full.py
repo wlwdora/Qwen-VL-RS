@@ -22,24 +22,24 @@ runner.load_ours(
 
 # ── 3. v2: 数据清洗 + visual LoRA SFT ──
 runner.add_baseline(
-    method="Ours v2 (数据清洗+visual LoRA SFT)",
+    method="Ours v2 (数据清洗+ViT r=32 SFT)",
     dataset="rsicd",
-    bleu_4=28.4,
-    rouge_l=50.8,
-    cider_d=62.4,
+    bleu_4=28.8,
+    rouge_l=51.0,
+    cider_d=66.0,
     n_samples=1093,
-    notes="数据去重清洗 + visual encoder LoRA r=16 + LLM LoRA r=32, 5 epochs SFT",
+    notes="数据去重清洗 + ViT r=32 + LLM r=32, 5 epochs SFT",
 )
 
-# ── 4. v3: DPO 偏好对齐 ──
+# ── 4. v3: ViT r=64 + DPO 偏好对齐 ──
 runner.add_baseline(
-    method="Ours v3 (DPO 偏好对齐)",
+    method="Ours v3 (DPO, ViT r=64)",
     dataset="rsicd",
-    bleu_4=31.5,
-    rouge_l=53.2,
-    cider_d=108.6,
+    bleu_4=33.2,
+    rouge_l=55.1,
+    cider_d=126.5,
     n_samples=1093,
-    notes="v2 SFT 基础上 DPO 训练 (β=0.1, 2 epochs), 5781 偏好对",
+    notes="ViT r=64 + LLM r=32 + DPO (β=0.1, 2 epochs), 5781 偏好对",
 )
 
 # ── 5. 文献 baseline ──
