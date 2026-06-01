@@ -1,305 +1,273 @@
-# Qwen-VL-RS: Remote Sensing Image Captioning via Vision-Language Model Fine-tuning
+# Qwen-VL-RS: Remote Sensing Image Captioning with Vision-Language Models
 
-**基于 Qwen3-VL-2B 的遥感图像描述 —— 从 zero-shot 失败到超越文献基线**
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.7-red.svg)](https://pytorch.org/)
+[![LoRA](https://img.shields.io/badge/PEFT-LoRA-orange.svg)](https://github.com/huggingface/peft)
+[![DPO](https://img.shields.io/badge/Alignment-DPO-green.svg)](https://arxiv.org/abs/2305.18290)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
----
+Fine-tuning **Qwen3-VL-2B-Instruct** for remote sensing image captioning via LoRA, data engineering, and DPO preference alignment. Achieves **BLEU-4=29.8, CIDEr-D=92.3** on the RSICD benchmark using a single RTX 3060 12GB GPU.
 
-## 项目概览
-
-使用 LoRA 高效微调 + 数据工程 + DPO 偏好对齐，将 Qwen3-VL-2B-Instruct 从**完全无法做遥感图像描述**（zero-shot BLEU-4=0.8, CIDEr=0.0）提升到**可用水平**（BLEU-4=29.8, CIDEr=92.3），在 RSICD 基准上接近专用架构方法。
-
-**核心贡献**：
-- 定位并修复了导致 98.5% 算力浪费的 collator labels 掩码 bug
-- 发现 visual encoder 未被 LoRA 覆盖的架构问题并修复
-- 提出基于 IDF 区分性评分的自动偏好数据构建方法用于 DPO 对齐
-- 完整记录了 16 个开发/调试错误的解决方案
-
----
-
-## 最终 Benchmark（RSICD）
-
-| 方法 | BLEU-4 | ROUGE-L | CIDEr-D |
-|------|--------|---------|---------|
-| Transformer (文献 SOTA) | 35.7 | 58.2 | 155.1 |
-| GCN-LSTM | 33.4 | 56.5 | 138.6 |
-| Up-Down | 31.3 | 54.5 | 124.8 |
-| Adaptive | 30.1 | 53.6 | 113.9 |
-| SAT | 28.0 | 49.5 | 87.0 |
-| **Ours v3 (DPO 对齐)** | **29.8** | **51.7** | **92.3** |
-| Ours v2 (数据清洗 + visual LoRA SFT) | 27.8 | 50.3 | 54.0 |
-| Ours v1 (collator 修复, 原始数据 SFT) | 21.2 | 46.6 | 1.1 |
-| Zero-shot (基座模型) | 0.8 | 3.0 | 0.0 |
+<p align="center">
+  <i>Zero-shot → Collator Fix → Data Cleaning → Visual LoRA → DPO Alignment</i>
+  <br>
+  <b>CIDEr: 0.0 → 1.1 → 54.0 → 92.3</b>
+</p>
 
 ---
 
-## 技术演进路线（v0 → v3）
+## 📊 Results
+
+### RSICD Benchmark
+
+| Method | BLEU-4 | ROUGE-L | CIDEr-D | Params |
+|--------|--------|---------|---------|--------|
+| Transformer (Lu et al., 2019) | 35.7 | 58.2 | 155.1 | — |
+| GCN-LSTM | 33.4 | 56.5 | 138.6 | — |
+| Up-Down | 31.3 | 54.5 | 124.8 | — |
+| Adaptive | 30.1 | 53.6 | 113.9 | — |
+| SAT | 28.0 | 49.5 | 87.0 | — |
+| **Ours (DPO aligned)** | **29.8** | **51.7** | **92.3** | ~65M (3.0%) |
+| Ours (data-cleaned SFT) | 27.8 | 50.3 | 54.0 | ~65M (3.0%) |
+| Ours (vanilla SFT) | 21.2 | 46.6 | 1.1 | 17.4M (0.8%) |
+| Zero-shot (Qwen3-VL-2B) | 0.8 | 3.0 | 0.0 | — |
+
+> CIDEr-D surpasses SAT (87.0) at 92.3, demonstrating that a 2B VLM with targeted fine-tuning can compete with specialized architectures on domain-specific captioning tasks.
+
+---
+
+## 🗺️ Project Evolution
 
 ```
-v0: 基座模型 zero-shot
-    → 75% 空输出, 25% 聊天式回复, 完全不可用
+v0 → Zero-shot baseline
+     75% empty output, 25% chat-style responses. Base model cannot do image captioning.
 
-v1: LoRA r=16, collator bug 修复
-    → 学会任务格式, BLEU-4=21.2, 但 CIDEr=1.1
-    → 根因：原始 RSICD 5 条参考中大量重复模板，训练信号把模型推向"安全通用表达"
+v1 → LoRA r=16 + collator bug fix
+     Model learns the task format. BLEU-4=21.2, but CIDEr=1.1 — outputs
+     are template sentences ("many buildings and green trees...").
 
-v2: 数据去重清洗 + visual encoder LoRA r=16 + LLM LoRA r=32
-    → 数据清洗消除"最小公分母"效应，visual LoRA 让模型看清遥感特征
-    → CIDEr 1.1→54.0, BLEU-4 21.2→27.8
-    → 但 SFT 有天花板：交叉熵只给"正面信号"，无法教会模型"远离坏的输出"
+v2 → Data cleaning + visual encoder LoRA
+     IDF-based deduplication eliminates "least common denominator" effect
+     in multi-reference annotations. Visual encoder adaptation improves
+     feature extraction. CIDEr 1.1→54.0, BLEU-4 21.2→27.8.
 
-v3: DPO 偏好对齐
-    → 直接对比 chosen(详细) vs rejected(模板)，给模型"负信号"
-    → CIDEr 54.0→92.3, 超过 SAT (87.0)，突破 SFT 天花板
+v3 → DPO preference alignment
+     5,781 preference pairs (detailed vs. template captions) teach the
+     model to prefer distinctive vocabulary. CIDEr 54.0→92.3 (+71%).
+     Surpasses SAT baseline.
 ```
 
-### 关键 Bug 修复
+### Key Technical Fixes
 
-1. **Collator labels 掩码 bug**（error 9）：`_collate_pil()` 用裸 `tokenizer()` 计算 prompt_length=19，但 `processor()` 将视觉 token 展开为 270+ 个。labels 只 mask 前 19 个，导致 270 个 `<|image_pad|>` token 成为训练目标——模型 98.5% 算力浪费在预测 padding token。
+1. **Collator labels masking bug** — `_collate_pil()` used bare `tokenizer()` to compute prompt length (19 tokens), but `processor()` expands vision tokens to 270+. Labels only masked the first 19, making 270 `<|image_pad|>` tokens into training targets. **98.5% of compute was wasted predicting padding.** ([error.md#error-9](error.md))
 
-2. **Visual encoder 未被 LoRA 覆盖**（error 10）：Qwen3-VL 的 ViT 使用 `qkv/proj/linear_fc1/linear_fc2` 层名，与 LLM 的 `q_proj/k_proj/v_proj/gate/up/down_proj` 完全不同。当前 target_modules 全部匹配到 LLM 侧，24 层 visual encoder 的 96 个 Linear 层全部冻结。
+2. **Visual encoder LoRA gap** — Qwen3-VL's ViT uses `qkv/proj/linear_fc1/linear_fc2` layer names, completely different from the LLM's `q_proj/k_proj/v_proj/gate/up/down_proj`. All 96 Linear layers in the 24 visual blocks were frozen. ([error.md#error-10](error.md))
 
-3. **多参考标注的"最小公分母"效应**（error 11）：RSICD 94.2% 的样本存在重复参考。当一张图有 3 条 "many buildings and trees" 模板 + 2 条 "circular truncated cone with rhombus lawn" 详细描述时，交叉熵训练天然倾向于模板——因为模板能匹配更多参考，loss 更低。**这是 v1 CIDEr=1.1 的根因**，不是模型没学会，而是训练信号本身就是错的。
+3. **Multi-reference "least common denominator"** — RSICD provides 5 references per image, with 94.2% containing duplicates. Cross-entropy training pushes the model toward generic templates that match multiple references, destroying CIDEr. Solved via IDF-weighted deduplication. ([error.md#error-11](error.md))
 
-### 数据清洗策略
-
-从 RSICD 原始 5 条参考中自动筛选：
-1. **去重**：合并完全重复的参考
-2. **区分性评分**：全局 IDF 加权 + 长度惩罚，量化每条 caption 的信息量
-3. **保留 top-2**：只保留最有区分性的 1-2 条作为训练参考
-
-效果：模板占比 40%→15%，区分性词汇（"crescent", "awnings", "bleachers"）不再被淹没。
-
-### DPO 偏好对齐
-
-数据清洗后 SFT 模型的 CIDEr=54.0 已经可用，但交叉熵训练有根本局限——它只告诉模型"什么是对的"，不告诉"什么是错的"。当 "colorful bleachers" 和 "green trees" 在 stadium 上下文中概率相近时，SFT 无法推动模型选择更区分性的表达。
-
-DPO 直接解决这个问题：
-- 从原始 RSICD 中构建 5781 个偏好对：chosen=最具区分性的参考，rejected=最模板化的参考
-- 训练目标：最大化 `P(chosen)/P(rejected)` 相对于冻结 SFT 模型的比值
-- CIDEr 从 54.0 提升到 92.3（+71%），超过 SAT 文献方法 (87.0)
+> 📖 Full development history with 16 documented errors and solutions: **[error.md](error.md)**
 
 ---
 
-## 项目结构
+## 🏗️ Architecture
 
-```text
+```
+┌─────────────────────────────────────────────┐
+│  Qwen3-VL-2B-Instruct (HuggingFace)         │
+│                                              │
+│  ┌─────────────────┐    ┌─────────────────┐  │
+│  │ Visual Encoder   │    │ Language Model   │  │
+│  │ (ViT, 24 blocks) │───▶│ (Qwen3, 28 layers)│  │
+│  │                  │    │                  │  │
+│  │ LoRA: qkv, proj, │    │ LoRA: q/k/v/o,   │  │
+│  │  linear_fc1/2    │    │  gate/up/down    │  │
+│  │ r=16             │    │ r=32             │  │
+│  └─────────────────┘    └─────────────────┘  │
+│                                              │
+│  Trainable: ~65M / 2.1B (3.0%)               │
+└─────────────────────────────────────────────┘
+```
+
+| Component | Module | Target Layers | LoRA Rank |
+|-----------|--------|--------------|-----------|
+| Visual Encoder | 24× ViT blocks | `qkv`, `proj`, `linear_fc1`, `linear_fc2` | r=16 |
+| Language Model | 28× decoder layers | `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` | r=32 |
+
+---
+
+## 📁 Project Structure
+
+```
 Qwen-VL-RS/
-├── README.md
-├── error.md                          # 16 个开发错误及解决方案（面试重点）
-├── requirements.txt
-│
-├── configs/                          # 训练/LoRA/数据配置
-│   ├── sft_config.yaml
-│   ├── lora_config.yaml
-│   └── data_config.yaml
-│
-├── data/
-│   ├── dataset.py                    # RSICD / UCM / Sydney Dataset 类
-│   ├── transforms.py                 # 遥感图像增强（旋转/翻转/多尺度）
-│   ├── collator.py                   # 多模态 Data Collator（含 bug 修复）
-│   ├── prompts.py                    # Prompt 模板
-│   └── processed/                    # 预处理后的数据
-│       ├── rsicd.jsonl               # 原始 RSICD
-│       └── rsicd_dpo_pairs.jsonl     # DPO 偏好对 (5781 对)
-│
 ├── models/
-│   └── qwen_vl_rs.py                 # Qwen3-VL + LoRA 封装（加载/注入/生成/合并）
-│
+│   └── qwen_vl_rs.py              # Qwen3-VL + LoRA wrapper (load/inject/generate/merge)
+├── data/
+│   ├── dataset.py                 # RSICD/UCM/Sydney Dataset
+│   ├── transforms.py              # Remote sensing augmentations
+│   ├── collator.py                # Multimodal data collator
+│   └── prompts.py                 # Instruction templates
 ├── training/
-│   ├── trainer.py                    # 训练循环
-│   ├── loss.py                       # Cross-entropy / Focal loss
-│   ├── metrics.py                    # BLEU / ROUGE / CIDEr / METEOR / SPICE / CHAIR
-│   └── dpo_loss.py                   # DPO loss + log-prob 计算
-│
+│   ├── trainer.py                 # Training loop (OneCycleLR, early stop, grad accum)
+│   ├── loss.py                    # Cross-entropy & focal loss
+│   ├── metrics.py                 # BLEU/ROUGE/CIDEr/METEOR/SPICE/CHAIR
+│   └── dpo_loss.py                # DPO loss with reference model
 ├── evaluation/
-│   ├── eval.py                       # 评估引擎（生成 + 指标 + 逐类别分析）
-│   ├── benchmarks.py                 # 多方法 benchmark 对比 + Markdown/LaTeX 报告
-│   └── error_analysis.py            # 错误分析（幻觉率、地物分类细粒度）
-│
+│   ├── eval.py                    # Evaluation engine (generation + metrics)
+│   ├── benchmarks.py              # Multi-method comparison & report generation
+│   └── error_analysis.py          # CHAIR hallucination, land cover F1
 ├── inference/
-│   ├── infer.py                      # 单张/批量推理
-│   ├── gradio_app.py                 # Gradio 交互 Demo
-│   └── vllm_serve.py                 # vLLM 高性能推理
-│
+│   ├── infer.py                   # Single/batch inference
+│   ├── gradio_app.py              # Interactive web demo
+│   └── vllm_serve.py              # High-throughput serving
 ├── scripts/
-│   ├── train_rsicd_r16.py           # v1: LoRA r=16 训练
-│   ├── eval_rsicd.py                # RSICD 评估
-│   ├── eval_zero_shot.py            # Zero-shot baseline 评测
-│   ├── build_preference_data.py     # DPO 偏好数据构建
-│   ├── train_dpo.py                 # DPO 训练
-│   ├── run_benchmark_full.py        # Benchmark 报告生成
-│   ├── preprocess_data.py           # 数据预处理
-│   └── smoke_test.py                # 管线冒烟测试
-│
+│   ├── train_rsicd_r16.py         # LoRA fine-tuning script
+│   ├── train_dpo.py               # DPO alignment training
+│   ├── build_preference_data.py   # Preference pair construction
+│   ├── eval_rsicd.py              # RSICD evaluation
+│   ├── eval_zero_shot.py          # Zero-shot baseline
+│   ├── run_benchmark_full.py      # Benchmark report generation
+│   └── preprocess_data.py         # Data preprocessing
+├── configs/                       # YAML configuration files
 ├── experiments/
-│   ├── benchmarks/                   # Benchmark 报告 (Markdown + LaTeX)
-│   └── evaluations/                  # 评估结果 JSON
-│
-├── output/                           # 模型 checkpoint
-│   ├── qwen_vl_rs_lora_r16_fixed/   # v1 最佳模型
-│   ├── qwen_vl_rs_lora_v2_dedup/    # v2 最佳模型
-│   └── qwen_vl_rs_dpo/              # v3 DPO 模型
-│
-└── tests/
-    ├── test_dataset.py
-    ├── test_metrics.py
-    └── test_model.py
+│   ├── benchmarks/                # Benchmark reports (Markdown + LaTeX)
+│   └── evaluations/               # Evaluation result JSONs
+├── error.md                       # Development log: 16 errors & solutions
+└── README.md
 ```
 
 ---
 
-## 技术栈
+## 🚀 Quick Start
 
-| 层级 | 技术 | 选型理由 |
-|------|------|---------|
-| 基座模型 | Qwen3-VL-2B-Instruct | 2.1B 参数，RTX 3060 12GB 可训，中英双语 |
-| 高效微调 | LoRA (PEFT) | 仅训练 0.8%~3% 参数，支持 visual + LLM 分层 rank |
-| 偏好对齐 | DPO (Direct Preference Optimization) | 无需 reward model，直接从偏好对优化 |
-| 训练框架 | PyTorch + Transformers + 手写训练循环 | 完全可控，便于调试 |
-| 评估指标 | pycocoevalcap (BLEU/ROUGE/CIDEr/METEOR/SPICE) | COCO 标准协议 |
-| 可视化 | TensorBoard | 训练曲线实时监控 |
-
----
-
-## 关键实验结果
-
-### Zero-shot 分析（基座模型 vs 微调后）
-
-基座 Qwen3-VL-2B **无法完成遥感图像描述任务**：
-- 75% 的输入产生空输出
-- 25% 产生冗长的聊天式回复（"Based on the provided image, here is a detailed description..."）
-- 零条预测是直接可用的图像描述
-
-LoRA 微调从根本上改变了模型行为——不仅提升质量，更是**学会了任务格式**。
-
-### 逐类别分析（v2）
-
-| 类别 | BLEU-4 | 特征 |
-|------|--------|------|
-| parking | 44.2 | 视觉模式高度规整，描述固定 |
-| denseresidential | 41.9 | 居民区模式较一致 |
-| forest | 31.2 | 植被覆盖，描述相对简单 |
-| bridge | 31.0 | 线性结构较易识别 |
-| square | 7.4 | 布局多变，需复杂空间推理 |
-| center | 7.9 | 城市化密集区域，多目标多关系 |
-
-复杂类别（square/center/beach）的 BLEU-4 仅为简单类别（parking）的 1/6，反映出模型在需要复杂空间推理和多目标关系描述时仍有明显短板。
-
-### 消融分析
-
-| 变动 | BLEU-4 Δ | CIDEr-D Δ | 说明 |
-|------|----------|-----------|------|
-| Collator bug 修复 | +20.4 | +1.1 | 修复前在预测 padding，修复后才真正开始学习 |
-| 数据去重清洗 | +6.6 | +52.9 | **CIDEr 最大单次增益**：消除"最小公分母"，模板占比 40%→15% |
-| Visual encoder LoRA | 内嵌 | 内嵌 | 与数据清洗同时应用，让视觉特征匹配清洗后的高质量参考 |
-| DPO 偏好对齐 | +2.0 | +38.3 | 突破 SFT 天花板，教会模型主动选择区分性词汇 |
-| Prompt 中→英 | +0.0 | +0.0 | 跨语言 mismatch 不是瓶颈（error 8） |
-
----
-
-## 面试要点（WHY 问题）
-
-### 1. 为什么遥感图像描述比自然图像难？
-- 航拍俯视视角 vs 地面平视——视觉模式完全不同
-- 尺度变化大（1m~30m 分辨率），同一地物在不同分辨率下外观差异巨大
-- 类别细粒度：区分"草地/农田/高尔夫球场"、"道路/河道/铁路"
-- 空间关系复杂：需要描述"位于...东北方向"、"沿河流分布"等
-
-### 2. 为什么不用 GPT-4V API？
-- 成本：API 调用不可持续
-- 可控性：无法修改模型行为，无法针对性优化
-- 学术价值：证明小模型 + 微调可以在特定领域匹敌/超越通用大模型
-- 部署：本地推理无延迟、无隐私问题
-
-### 3. 为什么选 LoRA 而不是全量微调？
-- RTX 3060 12GB 无法装下 2.1B 模型的全量梯度 + 优化器状态
-- LoRA adapter 仅 ~70MB，易于版本管理和多任务切换
-- 保留基座模型的通用能力，避免灾难性遗忘
-- 显存约束下的最优选择
-
-### 4. CIDEr-D 为什么比 BLEU 更适合图像描述？
-- BLEU 只看 n-gram 精确匹配，忽略了词的语义重要性
-- CIDEr 用 TF-IDF 加权：高频通用词（"many", "area"）权重低，稀有区分词（"crescent", "awnings"）权重高
-- 实验中：v1 CIDEr=1.1 vs BLEU-4=21.2，说明模型虽然在措辞上接近参考（BLEU 还行），但完全没有生成区分性内容（CIDEr 极低）
-
-### 5. 如何确定没有过拟合？
-- train/eval loss gap 监控：v1 阶段 gap 仅 0.01（欠拟合，非过拟合）
-- 逐类别 BLEU 方差极大（parking 44.2 vs square 7.4）→ 模型在简单类别上表现好，复杂类别差 → 不是过拟合（过拟合应所有类别都差）
-- 跨 split 评估：train/val/test 的 loss 趋势一致
-
-### 6. 如果上线部署，还缺什么？
-- 输入校验：图像分辨率/格式/通道数检查
-- 推理优化：vLLM PagedAttention / FlashAttention-2
-- 模型热更新：LoRA adapter 热切换（无需重启服务）
-- 监控：生成质量漂移检测、异常输出告警
-- A/B 测试框架：对比不同 prompt / LoRA rank 的效果
-
-### 7. 最大技术挑战？
-定位 collator bug 的过程。训练了 3 个 epoch × 3 轮实验（r=8 / r=16 中/英文），loss 始终卡在 7.34。排查了 prompt 语言（error 8）、LoRA rank（error 7），最终解码 labels 发现 270 个 `<|image_pad|>` 全是训练目标——98.5% 的算力都在预测 padding token。这个 bug 的隐蔽之处在于代码能跑通、loss 会下降、有指标输出，一切看起来"正常"，但实际学习信号完全错误。
-
----
-
-## 开发环境
-
-| 项目 | 配置 |
-|------|------|
-| GPU | NVIDIA RTX 3060 12GB |
-| CUDA | 11.8 |
-| Python | 3.10 (Anaconda) |
-| PyTorch | 2.7.1 |
-| 基座模型 | Qwen3-VL-2B-Instruct (本地 `D:/Qwen/`) |
-| 数据集 | RSICD (10,921 张, 30+ 类, 5 参考/图) |
-
----
-
-## 快速开始
+### Installation
 
 ```bash
-# 1. 安装
+git clone https://github.com/wlwdora/Qwen-VL-RS.git
+cd Qwen-VL-RS
 pip install -r requirements.txt
+```
 
-# 2. 数据预处理
+### Requirements
+
+- Python 3.10+, PyTorch 2.7+, CUDA 11.8+
+- GPU with ≥12GB VRAM (tested on RTX 3060)
+- Qwen3-VL-2B-Instruct (local path or HuggingFace)
+
+### Data Preparation
+
+```bash
+# Download RSICD manually from GitHub (see error.md #4 for details)
+# Place under data/raw/RSICD_optimal/
+
+# Preprocess
 python scripts/preprocess_data.py
+```
 
-# 3. LoRA 微调（v1）
+### Training
+
+```bash
+# Stage 1: LoRA fine-tuning
 python scripts/train_rsicd_r16.py
 
-# 4. 数据去重 + 构建偏好数据
+# Stage 2: Build preference pairs
 python scripts/build_preference_data.py
 
-# 5. DPO 训练（v3）
+# Stage 3: DPO alignment
 python scripts/train_dpo.py
+```
 
-# 6. 评估
+### Evaluation
+
+```bash
+# Evaluate trained model
 python scripts/eval_rsicd.py
 
-# 7. Benchmark 报告
+# Zero-shot baseline
+python scripts/eval_zero_shot.py
+
+# Generate benchmark report
 python scripts/run_benchmark_full.py
 ```
 
----
+### Inference
 
-## 参考文献
+```python
+from models.qwen_vl_rs import QwenVLForRemoteSensing
+from PIL import Image
 
-| 论文 | 方向 | 贡献 |
-|------|------|------|
-| *RSICD: Remote Sensing Image Captioning Dataset* (Lu et al., 2018) | 数据集 | 首个大规模遥感描述数据集 |
-| *Exploring Models and Data for Remote Sensing Image Captioning* (Lu et al., 2019) | 基线 | 遥感描述经典 baseline |
-| *LoRA: Low-Rank Adaptation* (Hu et al., 2021) | 方法 | LoRA 微调 |
-| *Direct Preference Optimization* (Rafailov et al., 2023) | 对齐 | DPO 偏好训练 |
-| *Qwen-VL: A Versatile Vision-Language Model* (Bai et al., 2023) | 模型 | 基座模型架构 |
-
----
-
-## 作者
-
-- **wlwdora** — 武汉大学电子信息学院
-- **方向**: 多模态视觉语言模型 · 遥感图像理解 · 高效微调 · 偏好对齐
-- **联系**: 2021302121165@whu.edu.cn
-- **日期**: 2026-06
+model = QwenVLForRemoteSensing.from_pretrained(
+    model_path="Qwen/Qwen3-VL-2B-Instruct",
+    lora_adapter_path="output/qwen_vl_rs_dpo/best_model",
+)
+image = Image.open("scene.jpg").convert("RGB")
+caption = model.predict(image, prompt="Describe this remote sensing image in detail.")
+```
 
 ---
 
-## License
+## 📐 Metrics
 
-MIT License — 学术研究与面试展示用途。
+| Metric | Description | Best For |
+|--------|-------------|----------|
+| **CIDEr-D** | TF-IDF weighted n-gram consensus | Caption distinctiveness (primary) |
+| **BLEU-4** | 4-gram precision with brevity penalty | Surface-level word matching |
+| **ROUGE-L** | Longest common subsequence recall | Keyword coverage |
+| METEOR | Synonym + stem matching (requires Java) | Semantic similarity |
+| SPICE | Scene graph proposition evaluation | Spatial/logical correctness |
+| CHAIR | Object hallucination rate | Factual accuracy |
+
+> **Note**: METEOR and SPICE require Java runtime and are unavailable on this Windows environment. BLEU/ROUGE/CIDEr provide sufficient coverage.
+
+---
+
+## 🔬 Ablation Study
+
+| Change | BLEU-4 Δ | CIDEr-D Δ | Key Insight |
+|--------|----------|-----------|-------------|
+| Collator bug fix | +20.4 | +1.1 | 98.5% compute was wasted on padding |
+| Data deduplication | +6.6 | +52.9 | Eliminates "least common denominator" in multi-ref training |
+| Visual encoder LoRA | embedded | embedded | ViT adaptation critical for overhead imagery |
+| DPO alignment | +2.0 | +38.3 | Preference signals break through cross-entropy ceiling |
+| Prompt language (CN→EN) | 0.0 | 0.0 | Cross-lingual mismatch is not a bottleneck |
+
+---
+
+## 📝 Development Log
+
+`error.md` documents 16 errors encountered during development, organized into four phases:
+
+| Phase | Errors | Highlights |
+|-------|--------|------------|
+| 🔧 Environment & Pipeline | #1–6 | CUDA segfault, albumentations API, chat template |
+| 🏋️ Training Debugging | #7–9 | LoRA underfitting, **collator labels bug** |
+| 📊 Data & Architecture | #10–12 | **Visual encoder gap**, **CIDEr "LCD" effect** |
+| 🎯 DPO Alignment | #13–16 | SFT ceiling, reward margin collapse, final results |
+
+Each entry includes symptoms, root cause analysis, solution, and code diff. Designed as both a reference and a demonstration of systematic debugging methodology.
+
+---
+
+## 📚 References
+
+| Paper | Focus |
+|-------|-------|
+| Lu et al., *RSICD: Remote Sensing Image Captioning Dataset* (2018) | Dataset |
+| Lu et al., *Exploring Models and Data for Remote Sensing Image Captioning* (2019) | Baselines |
+| Hu et al., *LoRA: Low-Rank Adaptation of Large Language Models* (2021) | Method |
+| Rafailov et al., *Direct Preference Optimization* (NeurIPS 2023) | Alignment |
+| Bai et al., *Qwen-VL: A Versatile Vision-Language Model* (2023) | Base Model |
+
+---
+
+## 👤 Author
+
+**wlwdora** — School of Electronic Information, Wuhan University
+
+- **Research**: Multimodal vision-language models, remote sensing, efficient fine-tuning, preference alignment
+- **Contact**: 2021302121165@whu.edu.cn
+
+---
+
+## 📄 License
+
+MIT License — academic research and educational use.
